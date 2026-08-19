@@ -38,7 +38,7 @@ ATR_PERIOD = 14
 MIN_ATR_PCT = 0.08
 COOLDOWN_MINUTES = 30
 SL_ATR_MULT = 1.2
-TP_ATR_MULT = 2.0
+TP_ATR_MULT = 2.4   # نسبة TP:SL = 2.0 → عند استخدام الحجم المقترح ونسبة مخاطرة 5%، الهدف ≈ 10% من رأس المال
 
 # ============================ فلتر الأخبار ============================
 AVOID_NEWS = True
@@ -56,15 +56,15 @@ STOCK_SESSION_UTC = (13, 20)  # جلسة السوق الأمريكي تقريب�
 # ============================ فلتر الدعوم والمقاومة ============================
 ENABLE_SR_FILTER = True
 SR_LOOKBACK = 30            # عدد الشموع للبحث عن أقرب دعم/مقاومة
-SR_MIN_DISTANCE_ATR = 1.0   # أقل مسافة مطلوبة (بوحدات ATR) بين السعر وأقرب حاجز
+SR_MIN_DISTANCE_ATR = 0.5   # أقل مسافة مطلوبة (بوحدات ATR) بين السعر وأقرب حاجز - تم تخفيفه
 
 # ============================ تأكيد نموذج الشمعة ============================
-ENABLE_CANDLE_CONFIRM = True   # لو True، لازم يتأكد نموذج ابتلاع مع باقي الشروط
+ENABLE_CANDLE_CONFIRM = False   # تم إيقافه مؤقتاً - كان أصعب شرط يتحقق ويقلل الإشارات كثير
 
 # ============================ حجم المركز المقترح ============================
 ENABLE_POSITION_SIZING = True
-ACCOUNT_BALANCE = 100.0        # عدّل هذا الرقم لرصيد حسابك التقريبي
-RISK_PERCENT_PER_TRADE = 5.0    # نسبة المخاطرة المقترحة من الرصيد لكل صفقة (%)
+ACCOUNT_BALANCE = 1000.0        # عدّل هذا الرقم لرصيد حسابك التقريبي
+RISK_PERCENT_PER_TRADE = 1.0    # نسبة المخاطرة المقترحة من الرصيد لكل صفقة (%)
 
 # ============================ إعدادات عامة ============================
 API_SLEEP_SECONDS = 8
@@ -326,8 +326,8 @@ def scan_symbol(symbol: str, news_events: list, state: dict, log: list, now_utc:
     macd_cross_up = (e1["macd"] > e1["macd_signal"]) and (e0["macd"] <= e0["macd_signal"])
     macd_cross_down = (e1["macd"] < e1["macd_signal"]) and (e0["macd"] >= e0["macd_signal"])
 
-    rsi_recovering_up = 30 < e1["rsi"] < 55 and e0["rsi"] <= e1["rsi"]
-    rsi_recovering_down = 45 < e1["rsi"] < 70 and e0["rsi"] >= e1["rsi"]
+    rsi_recovering_up = 25 < e1["rsi"] < 60 and e0["rsi"] <= e1["rsi"]
+    rsi_recovering_down = 40 < e1["rsi"] < 75 and e0["rsi"] >= e1["rsi"]
 
     buy_signal = trend_up and entry_up and macd_cross_up and rsi_recovering_up
     sell_signal = trend_down and entry_down and macd_cross_down and rsi_recovering_down
