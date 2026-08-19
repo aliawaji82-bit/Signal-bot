@@ -1,29 +1,65 @@
 """
-Signal Scanner v3 - بوت تحليل فني مجاني للسكالبينج (M5/M15)
-إضافات هذي النسخة:
-  - فلتر جلسات التداول (بديل عملي لفلتر السبريد - السيولة العالية = سبريد أقل عادة)
-  - فلتر دعوم/مقاومة (يتجنب الدخول قريب من حاجز فني)
-  - تأكيد نموذج شمعة (ابتلاع صاعد/هابط) كشرط إضافي
-  - حجم مركز مقترح بناءً على نسبة مخاطرة من رأس المال
-  - سجل أداء تلقائي (يتتبع كل إشارة ويحسب نسبة النجاح) + ملخص أسبوعي عبر تيليجرام
+Signal Scanner v4 - بوت تحليل فني مجاني للسكالبينج (M5/M15)
+مصدرين للبيانات:
+  - Yahoo Finance (رئيسي) - تغطية واسعة جداً، بدون سقف يومي رسمي، لكنه غير رسمي وممكن يتغير بدون إنذار
+  - Twelve Data (احتياطي) - يشتغل تلقائياً لو Yahoo فشل بأي رمز، لكنه محدود بـ800 طلب/يوم بالخطة المجانية
 يرسل عبر تيليجرام - تحليل فقط بدون تنفيذ تلقائي
 """
 
 import os
 import json
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import requests
 import pandas as pd
+import yfinance as yfin
 
 # ============================ الرموز المراقبة ============================
-# صيغة الفوركس/المعادن: "EUR/USD"  |  الأسهم: "AAPL"  |  الكريبتو: "BTC/USD"
-FOREX_COMMODITY_SYMBOLS = ["XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"]
-CRYPTO_SYMBOLS = ["BTC/USD", "ETH/USD"]
-STOCK_SYMBOLS = ["AAPL", "TSLA"]
+# كل رمز: label = الاسم المعروض | yf = رمز Yahoo Finance | td = رمز Twelve Data (احتياطي، أو None لو غير مدعوم)
+# category تتحكم بفلتر الجلسة | news_currencies تتحكم بفلتر تجنب الأخبار
 
-SYMBOLS = FOREX_COMMODITY_SYMBOLS + CRYPTO_SYMBOLS + STOCK_SYMBOLS
+def fx(label, yf_sym, td_sym, base, quote):
+    return {"label": label, "yf": yf_sym, "td": td_sym, "category": "forex", "news_currencies": [base, quote]}
+
+SYMBOLS = [
+    # ---- فوركس (10) ----
+    fx("EUR/USD", "EURUSD=X", "EUR/USD", "EUR", "USD"),
+    fx("GBP/USD", "GBPUSD=X", "GBP/USD", "GBP", "USD"),
+    fx("USD/JPY", "USDJPY=X", "USD/JPY", "USD", "JPY"),
+    fx("USD/CHF", "USDCHF=X", "USD/CHF", "USD", "CHF"),
+    fx("AUD/USD", "AUDUSD=X", "AUD/USD", "AUD", "USD"),
+    fx("USD/CAD", "USDCAD=X", "USD/CAD", "USD", "CAD"),
+    fx("NZD/USD", "NZDUSD=X", "NZD/USD", "NZD", "USD"),
+    fx("EUR/JPY", "EURJPY=X", "EUR/JPY", "EUR", "JPY"),
+    fx("GBP/JPY", "GBPJPY=X", "GBP/JPY", "GBP", "JPY"),
+    fx("EUR/GBP", "EURGBP=X", "EUR/GBP", "EUR", "GBP"),
+
+    # ---- معادن وطاقة (3) ----
+    {"label": "XAU/USD (ذهب)", "yf": "XAUUSD=X", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAG/USD (فضة)", "yf": "XAGUSD=X", "td": None, "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "WTI (نفط)", "yf": "CL=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
+
+    # ---- كريبتو (6) ----
+    {"label": "BTC/USD", "yf": "BTC-USD", "td": "BTC/USD", "category": "crypto", "news_currencies": ["USD"]},
+    {"label": "ETH/USD", "yf": "ETH-USD", "td": "ETH/USD", "category": "crypto", "news_currencies": ["USD"]},
+    {"label": "SOL/USD", "yf": "SOL-USD", "td": "SOL/USD", "category": "crypto", "news_currencies": ["USD"]},
+    {"label": "BNB/USD", "yf": "BNB-USD", "td": "BNB/USD", "category": "crypto", "news_currencies": ["USD"]},
+    {"label": "XRP/USD", "yf": "XRP-USD", "td": "XRP/USD", "category": "crypto", "news_currencies": ["USD"]},
+    {"label": "ADA/USD", "yf": "ADA-USD", "td": "ADA/USD", "category": "crypto", "news_currencies": ["USD"]},
+
+    # ---- مؤشرات (4) ----
+    {"label": "S&P 500", "yf": "^GSPC", "td": None, "category": "stock", "news_currencies": ["USD"]},
+    {"label": "Nasdaq", "yf": "^IXIC", "td": None, "category": "stock", "news_currencies": ["USD"]},
+    {"label": "Dow Jones", "yf": "^DJI", "td": None, "category": "stock", "news_currencies": ["USD"]},
+    {"label": "DAX", "yf": "^GDAXI", "td": None, "category": "stock", "news_currencies": ["EUR"]},
+
+    # ---- أسهم كبرى (20) ----
+    *[{"label": s, "yf": s, "td": s, "category": "stock", "news_currencies": ["USD"]} for s in [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "NFLX", "AMD", "INTC",
+        "JPM", "V", "DIS", "KO", "PEP", "WMT", "BA", "XOM", "PYPL", "ORCL",
+    ]],
+]
 
 # ============================ إعدادات المؤشرات ============================
 TREND_TF = "15min"
@@ -46,29 +82,29 @@ NEWS_BUFFER_MINUTES = 30
 ALSO_MEDIUM_IMPACT = False
 
 # ============================ فلتر جلسات التداول ============================
-# ملاحظة: خطة Twelve Data المجانية ما توفر بيانات سبريد حية.
-# كبديل عملي، نتجنب التداول بأوقات السيولة الضعيفة (سبريد أعلى غالباً) عبر تحديد نوافذ الجلسات.
 ENABLE_SESSION_FILTER = True
-FOREX_SESSION_UTC = (7, 21)   # لندن + نيويورك مجتمعتين (تقريبي)
-STOCK_SESSION_UTC = (13, 20)  # جلسة السوق الأمريكي تقريباً
+FOREX_SESSION_UTC = (7, 21)   # لندن + نيويورك مجتمعتين (تقريبي) - يشمل الفوركس والمعادن
+STOCK_SESSION_UTC = (13, 20)  # جلسة السوق الأمريكي تقريباً - يشمل الأسهم والمؤشرات
 # الكريبتو يشتغل 24/7 بدون فلتر جلسة
 
 # ============================ فلتر الدعوم والمقاومة ============================
 ENABLE_SR_FILTER = True
-SR_LOOKBACK = 30            # عدد الشموع للبحث عن أقرب دعم/مقاومة
-SR_MIN_DISTANCE_ATR = 0.5   # أقل مسافة مطلوبة (بوحدات ATR) بين السعر وأقرب حاجز - تم تخفيفه
+SR_LOOKBACK = 30
+SR_MIN_DISTANCE_ATR = 0.5
 
 # ============================ تأكيد نموذج الشمعة ============================
-ENABLE_CANDLE_CONFIRM = False   # تم إيقافه مؤقتاً - كان أصعب شرط يتحقق ويقلل الإشارات كثير
+ENABLE_CANDLE_CONFIRM = False
 
 # ============================ حجم المركز المقترح ============================
 ENABLE_POSITION_SIZING = True
-ACCOUNT_BALANCE = 1000.0        # عدّل هذا الرقم لرصيد حسابك التقريبي
-RISK_PERCENT_PER_TRADE = 1.0    # نسبة المخاطرة المقترحة من الرصيد لكل صفقة (%)
+ACCOUNT_BALANCE = 1000.0
+RISK_PERCENT_PER_TRADE = 5.0
 
 # ============================ إعدادات عامة ============================
-API_SLEEP_SECONDS = 8
-TWELVE_DATA_KEY = os.environ["TWELVE_DATA_API_KEY"]
+TD_API_SLEEP_SECONDS = 8     # مهلة فقط عند استخدام Twelve Data كاحتياطي
+YF_API_SLEEP_SECONDS = 1     # مهلة خفيفة بين طلبات Yahoo لتجنب أي تقييد
+
+TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
@@ -78,18 +114,52 @@ SUMMARY_EVERY_DAYS = 7
 
 # ============================ أدوات جلب البيانات ============================
 
-def fetch_candles(symbol: str, interval: str, outputsize: int = 100):
+def fetch_candles_yf(yf_symbol: str, interval: str):
+    try:
+        df = yfin.Ticker(yf_symbol).history(period="7d", interval=interval, auto_adjust=False)
+        if df is None or df.empty:
+            return None
+        df = df.reset_index().rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})
+        return df[["open", "high", "low", "close"]].astype(float)
+    except Exception as e:
+        print(f"[تحذير] فشل جلب بيانات Yahoo لـ {yf_symbol} ({interval}): {e}")
+        return None
+
+
+def fetch_candles_td(td_symbol: str, interval: str, outputsize: int = 100):
+    if not TWELVE_DATA_KEY:
+        return None
     url = "https://api.twelvedata.com/time_series"
-    params = {"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_DATA_KEY}
+    params = {"symbol": td_symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_DATA_KEY}
     r = requests.get(url, params=params, timeout=20)
     data = r.json()
     if "values" not in data:
-        print(f"[تحذير] فشل جلب بيانات {symbol} ({interval}): {data}")
+        print(f"[تحذير] فشل جلب بيانات Twelve Data لـ {td_symbol} ({interval}): {data}")
         return None
     df = pd.DataFrame(data["values"]).iloc[::-1].reset_index(drop=True)
     for col in ["open", "high", "low", "close"]:
         df[col] = df[col].astype(float)
     return df
+
+
+def fetch_candles(cfg: dict, tf_key: str):
+    """tf_key: 'trend' أو 'entry' - يجرب Yahoo أول، ولو فشل يرجع لـ Twelve Data"""
+    yf_symbol = cfg.get("yf")
+    if yf_symbol:
+        yf_interval = "15m" if tf_key == "trend" else "5m"
+        df = fetch_candles_yf(yf_symbol, yf_interval)
+        time.sleep(YF_API_SLEEP_SECONDS)
+        if df is not None and len(df) >= 30:
+            return df
+
+    td_symbol = cfg.get("td")
+    if td_symbol:
+        td_interval = TREND_TF if tf_key == "trend" else ENTRY_TF
+        df = fetch_candles_td(td_symbol, td_interval)
+        time.sleep(TD_API_SLEEP_SECONDS)
+        return df
+
+    return None
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -118,34 +188,16 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def get_currencies(symbol: str):
-    if "/" in symbol:
-        base, quote = symbol.split("/")
-        return [base, quote]
-    return ["USD"]
-
-
-def symbol_category(symbol: str) -> str:
-    if symbol in CRYPTO_SYMBOLS:
-        return "crypto"
-    if symbol in STOCK_SYMBOLS:
-        return "stock"
-    return "forex"
-
-
-def is_session_active(symbol: str, now_utc: datetime) -> bool:
+def is_session_active(cfg: dict, now_utc: datetime) -> bool:
     if not ENABLE_SESSION_FILTER:
         return True
-    cat = symbol_category(symbol)
+    cat = cfg["category"]
     if cat == "crypto":
         return True
-    if now_utc.weekday() >= 5:  # السبت/الأحد
-        return cat != "stock"  # الفوركس شبه متوقف نهاية الأسبوع أصلاً، الأسهم مغلقة أكيد
+    if now_utc.weekday() >= 5:
+        return False
     hour = now_utc.hour
-    if cat == "stock":
-        start, end = STOCK_SESSION_UTC
-    else:
-        start, end = FOREX_SESSION_UTC
+    start, end = STOCK_SESSION_UTC if cat == "stock" else FOREX_SESSION_UTC
     return start <= hour < end
 
 
@@ -160,8 +212,8 @@ def fetch_news_events():
         return []
 
 
-def is_news_near(symbol: str, events: list, now_utc: datetime):
-    currencies = get_currencies(symbol)
+def is_news_near(cfg: dict, events: list, now_utc: datetime):
+    currencies = cfg["news_currencies"]
     for ev in events:
         impact = ev.get("impact", "")
         if impact != "High" and not (ALSO_MEDIUM_IMPACT and impact == "Medium"):
@@ -175,22 +227,6 @@ def is_news_near(symbol: str, events: list, now_utc: datetime):
         if abs((ev_time - now_utc).total_seconds()) / 60 <= NEWS_BUFFER_MINUTES:
             return True, ev.get("title", "")
     return False, None
-
-
-# ============================ نموذج الشمعة ============================
-
-def bullish_engulfing(prev_row, cur_row) -> bool:
-    return (prev_row["close"] < prev_row["open"] and
-            cur_row["close"] > cur_row["open"] and
-            cur_row["close"] >= prev_row["open"] and
-            cur_row["open"] <= prev_row["close"])
-
-
-def bearish_engulfing(prev_row, cur_row) -> bool:
-    return (prev_row["close"] > prev_row["open"] and
-            cur_row["close"] < cur_row["open"] and
-            cur_row["close"] <= prev_row["open"] and
-            cur_row["open"] >= prev_row["close"])
 
 
 # ============================ الدعم والمقاومة ============================
@@ -209,6 +245,16 @@ def sr_ok_for_sell(entry_df, price, atr) -> bool:
     window = entry_df.iloc[-(SR_LOOKBACK + 1):-1]
     support = window["low"].min()
     return (price - support) >= (SR_MIN_DISTANCE_ATR * atr)
+
+
+def bullish_engulfing(prev_row, cur_row) -> bool:
+    return (prev_row["close"] < prev_row["open"] and cur_row["close"] > cur_row["open"] and
+            cur_row["close"] >= prev_row["open"] and cur_row["open"] <= prev_row["close"])
+
+
+def bearish_engulfing(prev_row, cur_row) -> bool:
+    return (prev_row["close"] > prev_row["open"] and cur_row["close"] < cur_row["open"] and
+            cur_row["close"] <= prev_row["open"] and cur_row["open"] >= prev_row["close"])
 
 
 # ============================ ملفات الحالة والسجل ============================
@@ -234,11 +280,10 @@ def send_telegram(text: str):
 
 # ============================ تتبع الأداء ============================
 
-def update_open_signals(log: list, symbol: str, latest_row):
-    """يتحقق من الإشارات المفتوحة لهذا الرمز هل ضربت الهدف أو الوقف"""
+def update_open_signals(log: list, label: str, latest_row):
     high, low = latest_row["high"], latest_row["low"]
     for sig in log:
-        if sig["symbol"] != symbol or sig["status"] != "open":
+        if sig["symbol"] != label or sig["status"] != "open":
             continue
         if sig["direction"] == "BUY":
             if high >= sig["tp"]:
@@ -280,23 +325,23 @@ def maybe_send_weekly_summary(log: list, state: dict, now_utc: datetime):
 
 # ============================ المنطق الرئيسي ============================
 
-def scan_symbol(symbol: str, news_events: list, state: dict, log: list, now_utc: datetime):
-    if not is_session_active(symbol, now_utc):
+def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: datetime):
+    label = cfg["label"]
+
+    if not is_session_active(cfg, now_utc):
         return
 
-    trend_df = fetch_candles(symbol, TREND_TF, outputsize=80)
-    time.sleep(API_SLEEP_SECONDS)
-    entry_df = fetch_candles(symbol, ENTRY_TF, outputsize=80)
-    time.sleep(API_SLEEP_SECONDS)
+    trend_df = fetch_candles(cfg, "trend")
+    entry_df = fetch_candles(cfg, "entry")
 
     if trend_df is None or entry_df is None or len(trend_df) < 55 or len(entry_df) < max(30, SR_LOOKBACK + 2):
+        print(f"[تخطي] {label}: بيانات غير كافية")
         return
 
     trend_df = add_indicators(trend_df)
     entry_df = add_indicators(entry_df)
 
-    # تحديث حالة أي إشارات مفتوحة سابقة لنفس الرمز بناءً على آخر شمعة
-    update_open_signals(log, symbol, entry_df.iloc[-1])
+    update_open_signals(log, label, entry_df.iloc[-1])
 
     t = trend_df.iloc[-2]
     e1 = entry_df.iloc[-2]
@@ -312,9 +357,9 @@ def scan_symbol(symbol: str, news_events: list, state: dict, log: list, now_utc:
         return
 
     if AVOID_NEWS:
-        near, title = is_news_near(symbol, news_events, now_utc)
+        near, title = is_news_near(cfg, news_events, now_utc)
         if near:
-            print(f"[تخطي] {symbol}: خبر مهم قريب ({title})")
+            print(f"[تخطي] {label}: خبر مهم قريب ({title})")
             return
 
     trend_up = t["ema_fast"] > t["ema_slow"]
@@ -345,7 +390,7 @@ def scan_symbol(symbol: str, news_events: list, state: dict, log: list, now_utc:
     for direction, active in (("BUY", buy_signal), ("SELL", sell_signal)):
         if not active:
             continue
-        key = f"{symbol}_{direction}"
+        key = f"{label}_{direction}"
         last = state.get(key)
         if last:
             last_dt = datetime.fromisoformat(last)
@@ -354,36 +399,36 @@ def scan_symbol(symbol: str, news_events: list, state: dict, log: list, now_utc:
 
         if direction == "BUY":
             sl, tp = price - atr * SL_ATR_MULT, price + atr * TP_ATR_MULT
-            label = "شراء محتمل 🟢"
+            head = "شراء محتمل 🟢"
         else:
             sl, tp = price + atr * SL_ATR_MULT, price - atr * TP_ATR_MULT
-            label = "بيع محتمل 🔴"
+            head = "بيع محتمل 🔴"
 
-        msg_lines = [
-            f"{label} - {symbol}",
+        lines = [
+            f"{head} - {label}",
             f"السعر: {price:.5f}",
             f"وقف الخسارة المقترح: {sl:.5f}",
             f"الهدف المقترح: {tp:.5f}",
-            "اتجاه M15 + دخول M5 + تأكيد شمعة ودعم/مقاومة",
+            "اتجاه M15 + دخول M5",
         ]
 
         if ENABLE_POSITION_SIZING:
             sl_distance = abs(price - sl)
             risk_amount = ACCOUNT_BALANCE * (RISK_PERCENT_PER_TRADE / 100)
             if sl_distance > 0:
-                suggested_units = risk_amount / sl_distance
-                msg_lines.append(f"حجم مقترح تقريبي: {suggested_units:.2f} وحدة (بناءً على مخاطرة {RISK_PERCENT_PER_TRADE}% من {ACCOUNT_BALANCE:.0f})")
-                msg_lines.append("⚠️ هذا تقدير عام، حوّله للوت الصحيح حسب حجم العقد بمنصتك قبل التنفيذ")
+                units = risk_amount / sl_distance
+                lines.append(f"حجم مقترح تقريبي: {units:.2f} وحدة (مخاطرة {RISK_PERCENT_PER_TRADE}% من {ACCOUNT_BALANCE:.0f})")
+                lines.append("⚠️ حوّله للوت الصحيح حسب حجم العقد بمنصتك قبل التنفيذ")
 
-        msg_lines.append("⚠️ السبريد الفعلي غير متاح من مصدر البيانات المجاني - تأكد منه داخل MT5 قبل الدخول")
+        lines.append("⚠️ تأكد من السبريد الفعلي داخل MT5 قبل الدخول")
 
-        msg = "\n".join(msg_lines)
+        msg = "\n".join(lines)
         send_telegram(msg)
         print(msg)
         state[key] = now_utc.isoformat()
 
         log.append({
-            "symbol": symbol, "direction": direction, "entry_price": price,
+            "symbol": label, "direction": direction, "entry_price": price,
             "sl": sl, "tp": tp, "opened_at": now_utc.isoformat(), "status": "open",
         })
 
@@ -394,11 +439,11 @@ def main():
     state = load_json(STATE_FILE, {})
     log = load_json(LOG_FILE, [])
 
-    for symbol in SYMBOLS:
+    for cfg in SYMBOLS:
         try:
-            scan_symbol(symbol, news_events, state, log, now_utc)
+            scan_symbol(cfg, news_events, state, log, now_utc)
         except Exception as e:
-            print(f"[خطأ] فشل تحليل {symbol}: {e}")
+            print(f"[خطأ] فشل تحليل {cfg['label']}: {e}")
 
     maybe_send_weekly_summary(log, state, now_utc)
 
