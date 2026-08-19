@@ -36,8 +36,8 @@ SYMBOLS = [
     fx("EUR/GBP", "EURGBP=X", "EUR/GBP", "EUR", "GBP"),
 
     # ---- معادن وطاقة (3) ----
-    {"label": "XAU/USD (ذهب)", "yf": "XAUUSD=X", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
-    {"label": "XAG/USD (فضة)", "yf": "XAGUSD=X", "td": None, "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAU/USD (ذهب)", "yf": "GC=F", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
+{"label": "XAG/USD (فضة)", "yf": "SI=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
     {"label": "WTI (نفط)", "yf": "CL=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
 
     # ---- كريبتو (6) ----
