@@ -36,8 +36,8 @@ SYMBOLS = [
     fx("EUR/GBP", "EURGBP=X", "EUR/GBP", "EUR", "GBP"),
 
     # ---- معادن وطاقة (3) ----
-    {"label": "XAU/USD (ذهب)", "yf": "GC=F", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
-{"label": "XAG/USD (فضة)", "yf": "SI=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAU/USD (ذهب)", "yf": "XAUUSD=X", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAG/USD (فضة)", "yf": "XAGUSD=X", "td": None, "category": "commodity", "news_currencies": ["USD"]},
     {"label": "WTI (نفط)", "yf": "CL=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
 
     # ---- كريبتو (6) ----
@@ -329,6 +329,7 @@ def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: d
     label = cfg["label"]
 
     if not is_session_active(cfg, now_utc):
+        print(f"[تخطي] {label}: خارج وقت الجلسة النشطة")
         return
 
     trend_df = fetch_candles(cfg, "trend")
@@ -354,6 +355,7 @@ def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: d
     atr = e1["atr"]
     atr_pct = (atr / price) * 100
     if atr_pct < MIN_ATR_PCT:
+        print(f"[تخطي] {label}: تقلب ضعيف جداً ({atr_pct:.3f}% < {MIN_ATR_PCT}%)")
         return
 
     if AVOID_NEWS:
@@ -377,14 +379,21 @@ def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: d
     buy_signal = trend_up and entry_up and macd_cross_up and rsi_recovering_up
     sell_signal = trend_down and entry_down and macd_cross_down and rsi_recovering_down
 
+    if not buy_signal and not sell_signal:
+        print(f"[تخطي] {label}: لا توجد فرصة حالياً "
+              f"(اتجاه M15={'صاعد' if trend_up else 'هابط' if trend_down else 'متذبذب'}, "
+              f"RSI={e1['rsi']:.1f}, MACD_cross_up={macd_cross_up}, MACD_cross_down={macd_cross_down})")
+
     if buy_signal and ENABLE_CANDLE_CONFIRM:
         buy_signal = bullish_engulfing(e1, e0)
     if sell_signal and ENABLE_CANDLE_CONFIRM:
         sell_signal = bearish_engulfing(e1, e0)
 
     if buy_signal and not sr_ok_for_buy(entry_df, price, atr):
+        print(f"[تخطي] {label}: إشارة شراء رُفضت - قريبة جداً من مقاومة")
         buy_signal = False
     if sell_signal and not sr_ok_for_sell(entry_df, price, atr):
+        print(f"[تخطي] {label}: إشارة بيع رُفضت - قريبة جداً من دعم")
         sell_signal = False
 
     for direction, active in (("BUY", buy_signal), ("SELL", sell_signal)):
