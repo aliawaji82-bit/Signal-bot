@@ -36,8 +36,8 @@ SYMBOLS = [
     fx("EUR/GBP", "EURGBP=X", "EUR/GBP", "EUR", "GBP"),
 
     # ---- معادن وطاقة (3) ----
-    {"label": "XAU/USD (ذهب)", "yf": "XAUUSD=X", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
-    {"label": "XAG/USD (فضة)", "yf": "XAGUSD=X", "td": None, "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAU/USD (ذهب)", "yf": "GC=F", "td": "XAU/USD", "category": "commodity", "news_currencies": ["USD"]},
+    {"label": "XAG/USD (فضة)", "yf": "SI=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
     {"label": "WTI (نفط)", "yf": "CL=F", "td": None, "category": "commodity", "news_currencies": ["USD"]},
 
     # ---- كريبتو (6) ----
@@ -71,7 +71,7 @@ EMA_SLOW = 50
 MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
 ATR_PERIOD = 14
 
-MIN_ATR_PCT = 0.08
+MIN_ATR_PCT = 0.015   # تم تخفيضه - كان 0.08 وهذا مرتفع جداً على فريم M5 للفوركس (يستبعد كل الأزواج)
 COOLDOWN_MINUTES = 30
 SL_ATR_MULT = 1.2
 TP_ATR_MULT = 2.4   # نسبة TP:SL = 2.0 → عند استخدام الحجم المقترح ونسبة مخاطرة 5%، الهدف ≈ 10% من رأس المال
