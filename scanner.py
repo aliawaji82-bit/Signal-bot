@@ -247,6 +247,20 @@ def sr_ok_for_sell(entry_df, price, atr) -> bool:
     return (price - support) >= (SR_MIN_DISTANCE_ATR * atr)
 
 
+def macd_cross_recent(df: pd.DataFrame, lookback: int, direction: str) -> bool:
+    """يتحقق من وجود تقاطع MACD خلال آخر (lookback) انتقال بين الشموع، بدل شمعة واحدة بالضبط"""
+    macd = df["macd"].values
+    sig = df["macd_signal"].values
+    n = len(df)
+    start = max(1, n - lookback - 1)
+    for i in range(start, n - 1):
+        if direction == "up" and macd[i] <= sig[i] and macd[i + 1] > sig[i + 1]:
+            return True
+        if direction == "down" and macd[i] >= sig[i] and macd[i + 1] < sig[i + 1]:
+            return True
+    return False
+
+
 def bullish_engulfing(prev_row, cur_row) -> bool:
     return (prev_row["close"] < prev_row["open"] and cur_row["close"] > cur_row["open"] and
             cur_row["close"] >= prev_row["open"] and cur_row["open"] <= prev_row["close"])
@@ -367,17 +381,14 @@ def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: d
     trend_up = t["ema_fast"] > t["ema_slow"]
     trend_down = t["ema_fast"] < t["ema_slow"]
 
-    entry_up = e1["ema_fast"] > e1["ema_slow"]
-    entry_down = e1["ema_fast"] < e1["ema_slow"]
-
-    macd_cross_up = (e1["macd"] > e1["macd_signal"]) and (e0["macd"] <= e0["macd_signal"])
-    macd_cross_down = (e1["macd"] < e1["macd_signal"]) and (e0["macd"] >= e0["macd_signal"])
+    macd_cross_up = macd_cross_recent(entry_df, 3, "up")
+    macd_cross_down = macd_cross_recent(entry_df, 3, "down")
 
     rsi_recovering_up = 25 < e1["rsi"] < 60 and e0["rsi"] <= e1["rsi"]
     rsi_recovering_down = 40 < e1["rsi"] < 75 and e0["rsi"] >= e1["rsi"]
 
-    buy_signal = trend_up and entry_up and macd_cross_up and rsi_recovering_up
-    sell_signal = trend_down and entry_down and macd_cross_down and rsi_recovering_down
+    buy_signal = trend_up and (macd_cross_up or rsi_recovering_up)
+    sell_signal = trend_down and (macd_cross_down or rsi_recovering_down)
 
     if not buy_signal and not sell_signal:
         print(f"[تخطي] {label}: لا توجد فرصة حالياً "
