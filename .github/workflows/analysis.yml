@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python analysis/new_coins.py
+      - run: python analysis/more_trades.py
