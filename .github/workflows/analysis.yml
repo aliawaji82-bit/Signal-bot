@@ -1,9 +1,9 @@
-name: Evaluate past signals (one-off)
+name: Signal analysis (one-off)
 
 on:
   push:
     branches: [analysis/real-results]
-    paths: [analysis/evaluate_signals.py, .github/workflows/analysis.yml]
+    paths: [analysis/*.py, .github/workflows/analysis.yml]
 
 jobs:
   evaluate:
@@ -14,8 +14,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python analysis/evaluate_signals.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: results
-          path: analysis/results.json
+      - run: python analysis/backtest.py
