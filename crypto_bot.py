@@ -9,14 +9,14 @@
    - الوقف الأولي: 2 × ATR(14) تحت الدخول
    - الخروج: إغلاق تحت أدنى قاع لآخر 10 أيام
 
-2) إليوت - دخول الموجة الثالثة (موقوفة حالياً: ENABLE_ELLIOTT = False)
-   أوقفناها لأن صفقاتها تاخذ أماكن من صفقات الاختراق الأقوى: بنفس حد الصفقات
-   نزل الربح السنوي بالاختبار من ~27% إلى ~15% لما اشتغلت الاستراتيجيتين مع بعض
+2) إليوت - دخول الموجة الثالثة (بأماكن خاصة فيها)
+   لها حد مستقل (5 صفقات) عشان ما تاخذ أماكن من صفقات الاختراق. لما كانت تتقاسم نفس
+   الحد نزل الربح بالاختبار، ولما صار لها حد خاص ارتفع الربح السنوي (~37-41% مقابل ~29-32%)
    - موجة 1 صاعدة ثم تصحيح 38.2%-78.6% (موجة 2) ما يكسر بداية 1، بعد تأكيد قاع 2 بـ ZigZag (3 × ATR)
    - أمر شراء معلّق عند قمة موجة 1، يُلغى لو السعر كسر قاع 2 أو تكوّنت قمة جديدة قبل التنفيذ
    - الوقف: قاع موجة 2 | الهدف: قاع 2 + 2.618 × طول موجة 1
 
-إدارة المخاطرة: 1% من رأس المال لكل صفقة، وبحد أقصى 8 صفقات مفتوحة.
+إدارة المخاطرة: 1% من رأس المال لكل صفقة، وبحد أقصى 8 صفقات اختراق + 5 صفقات إليوت.
 (بالاختبار: حد 8 أعطى ~30% بالسنة بتراجع أقصى ~20%، مقابل ~27% وتراجع ~15% لحد 5)
 العملات: الـ16 الكبيرة بس - إضافة عملات أحدث (NEAR, SUI, INJ...) ما حسّنت النتيجة بالاختبار.
 """
@@ -33,8 +33,9 @@ COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT"
 
 ACCOUNT_BALANCE = float(os.environ.get("ACCOUNT_BALANCE", "1000"))
 RISK_PER_TRADE = 0.01
-MAX_OPEN = 8
-ENABLE_ELLIOTT = False
+MAX_OPEN = 8                # حد صفقات الاختراق المفتوحة
+MAX_OPEN_ELLIOTT = 5        # حد مستقل لصفقات إليوت
+ENABLE_ELLIOTT = True
 
 DONCHIAN_IN, DONCHIAN_OUT, DONCHIAN_STOP_ATR = 20, 10, 2.0
 ZIGZAG_K = 3.0
@@ -210,8 +211,8 @@ def main():
             finish(t, *res)
             send(close_msg(t))
 
-    def open_count():
-        return sum(1 for x in trades if x["status"] == "open")
+    def open_count(strategy):
+        return sum(1 for x in trades if x["status"] == "open" and x["strategy"] == strategy)
 
     # ---------- 2) الأوامر المعلّقة لإليوت ----------
     still = []
@@ -249,8 +250,8 @@ def main():
             send(f"🚫 إلغاء أمر معلّق - {p['coin']} (إليوت موجة 3)\nالسبب: {outcome[2]}\n"
                  f"إذا حاط الأمر بمنصتك، ألغه.\n{PAPER_NOTE}")
             continue
-        if open_count() >= MAX_OPEN:
-            send(f"⚠️ أمر {p['coin']} (إليوت موجة 3) تنفّذ بس ما انحسب - عندك {MAX_OPEN} صفقات مفتوحة (الحد الأقصى)\n{PAPER_NOTE}")
+        if open_count("ElliottW3") >= MAX_OPEN_ELLIOTT:
+            send(f"⚠️ أمر {p['coin']} (إليوت موجة 3) تنفّذ بس ما انحسب - عندك {MAX_OPEN_ELLIOTT} صفقات إليوت مفتوحة (الحد الأقصى)\n{PAPER_NOTE}")
             continue
         entry = float(outcome[2])
         t = dict(id=f"{p['coin']}-W3-{day(outcome[1])}", coin=p["coin"], strategy="ElliottW3", strategy_ar="إليوت موجة 3",
@@ -303,8 +304,8 @@ def main():
                 continue
             if df["close"].iloc[-1] <= df["high"].iloc[-DONCHIAN_IN - 1:-1].max():
                 continue
-            if open_count() >= MAX_OPEN:
-                send(f"⚠️ إشارة شراء {c} (اختراق 20 يوم) بس عندك {MAX_OPEN} صفقات مفتوحة - تجاهلناها\n{PAPER_NOTE}")
+            if open_count("Donchian20") >= MAX_OPEN:
+                send(f"⚠️ إشارة شراء {c} (اختراق 20 يوم) بس عندك {MAX_OPEN} صفقات اختراق مفتوحة - تجاهلناها\n{PAPER_NOTE}")
                 continue
             entry = today_open if today_open else float(df["close"].iloc[-1])
             stop = entry - DONCHIAN_STOP_ATR * float(df["atr"].iloc[-1])
@@ -343,7 +344,7 @@ def main():
         lines.append(f"صفقات مفتوحة: {len(opened)}" + (": " + ", ".join(f"{x['coin']}" for x in opened) if opened else ""))
         if ENABLE_ELLIOTT:
             lines.append(f"أوامر معلّقة: {len(state['pending'])}" + (": " + ", ".join(p["coin"] for p in state["pending"]) if state["pending"] else ""))
-        lines.append(f"الحد الأقصى: {MAX_OPEN} صفقات مفتوحة بنفس الوقت")
+        lines.append(f"الحد الأقصى: {MAX_OPEN} صفقات اختراق + {MAX_OPEN_ELLIOTT} صفقات إليوت")
         lines.append("المتوقع من الاختبار التاريخي: نسبة نجاح ~35-40% والربح من صفقات قليلة كبيرة - الحكم يحتاج شهور")
         send("\n".join(lines))
         state["last_summary"] = now.isoformat()
