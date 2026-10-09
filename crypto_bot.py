@@ -9,12 +9,16 @@
    - الوقف الأولي: 2 × ATR(14) تحت الدخول
    - الخروج: إغلاق تحت أدنى قاع لآخر 10 أيام
 
-2) إليوت - دخول الموجة الثالثة (إشارة إضافية)
+2) إليوت - دخول الموجة الثالثة (موقوفة حالياً: ENABLE_ELLIOTT = False)
+   أوقفناها لأن صفقاتها تاخذ أماكن من صفقات الاختراق الأقوى: بنفس حد الصفقات
+   نزل الربح السنوي بالاختبار من ~27% إلى ~15% لما اشتغلت الاستراتيجيتين مع بعض
    - موجة 1 صاعدة ثم تصحيح 38.2%-78.6% (موجة 2) ما يكسر بداية 1، بعد تأكيد قاع 2 بـ ZigZag (3 × ATR)
    - أمر شراء معلّق عند قمة موجة 1، يُلغى لو السعر كسر قاع 2 أو تكوّنت قمة جديدة قبل التنفيذ
    - الوقف: قاع موجة 2 | الهدف: قاع 2 + 2.618 × طول موجة 1
 
-إدارة المخاطرة: 1% من رأس المال لكل صفقة، وبحد أقصى 5 صفقات مفتوحة.
+إدارة المخاطرة: 1% من رأس المال لكل صفقة، وبحد أقصى 8 صفقات مفتوحة.
+(بالاختبار: حد 8 أعطى ~30% بالسنة بتراجع أقصى ~20%، مقابل ~27% وتراجع ~15% لحد 5)
+العملات: الـ16 الكبيرة بس - إضافة عملات أحدث (NEAR, SUI, INJ...) ما حسّنت النتيجة بالاختبار.
 """
 import json
 import os
@@ -29,7 +33,8 @@ COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT"
 
 ACCOUNT_BALANCE = float(os.environ.get("ACCOUNT_BALANCE", "1000"))
 RISK_PER_TRADE = 0.01
-MAX_OPEN = 5
+MAX_OPEN = 8
+ENABLE_ELLIOTT = False
 
 DONCHIAN_IN, DONCHIAN_OUT, DONCHIAN_STOP_ATR = 20, 10, 2.0
 ZIGZAG_K = 3.0
@@ -210,7 +215,7 @@ def main():
 
     # ---------- 2) الأوامر المعلّقة لإليوت ----------
     still = []
-    for p in state["pending"]:
+    for p in (state["pending"] if ENABLE_ELLIOTT else []):
         if p["coin"] not in data:
             still.append(p)
             continue
@@ -261,7 +266,7 @@ def main():
 
     # ---------- 3) إعدادات جديدة لإليوت (أمر معلّق) ----------
     seen = set(state["seen_setups"])
-    for c, (df, _) in data.items():
+    for c, (df, _) in (data.items() if ENABLE_ELLIOTT else []):
         piv = zigzag(df, ZIGZAG_K)
         for m in range(2, len(piv)):
             (i0, p0, _, _), (i1, p1, _, _), (i2, p2, t2, c2) = piv[m - 2: m + 1]
@@ -336,7 +341,9 @@ def main():
         else:
             lines.append("لسا ما فيه صفقات مقفلة")
         lines.append(f"صفقات مفتوحة: {len(opened)}" + (": " + ", ".join(f"{x['coin']}" for x in opened) if opened else ""))
-        lines.append(f"أوامر معلّقة: {len(state['pending'])}" + (": " + ", ".join(p["coin"] for p in state["pending"]) if state["pending"] else ""))
+        if ENABLE_ELLIOTT:
+            lines.append(f"أوامر معلّقة: {len(state['pending'])}" + (": " + ", ".join(p["coin"] for p in state["pending"]) if state["pending"] else ""))
+        lines.append(f"الحد الأقصى: {MAX_OPEN} صفقات مفتوحة بنفس الوقت")
         lines.append("المتوقع من الاختبار التاريخي: نسبة نجاح ~35-40% والربح من صفقات قليلة كبيرة - الحكم يحتاج شهور")
         send("\n".join(lines))
         state["last_summary"] = now.isoformat()
