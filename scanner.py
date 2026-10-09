@@ -9,7 +9,7 @@ Signal Scanner v4 - بوت تحليل فني مجاني للسكالبينج (M5
 import os
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 import pandas as pd
@@ -74,7 +74,7 @@ ATR_PERIOD = 14
 MIN_ATR_PCT = 0.015   # تم تخفيضه - كان 0.08 وهذا مرتفع جداً على فريم M5 للفوركس (يستبعد كل الأزواج)
 COOLDOWN_MINUTES = 30
 SL_ATR_MULT = 1.2
-TP_ATR_MULT = 2.4   # نسبة TP:SL = 2.0 → عند استخدام الحجم المقترح ونسبة مخاطرة 5%، الهدف ≈ 10% من رأس المال
+TP_ATR_MULT = 2.4   # نسبة TP:SL = 2.0 → عند استخدام الحجم المقترح ونسبة مخاطرة 1%، الهدف ≈ 2% من رأس المال
 
 # ============================ فلتر الأخبار ============================
 AVOID_NEWS = True
@@ -98,7 +98,7 @@ ENABLE_CANDLE_CONFIRM = False
 # ============================ حجم المركز المقترح ============================
 ENABLE_POSITION_SIZING = True
 ACCOUNT_BALANCE = 1000.0
-RISK_PERCENT_PER_TRADE = 5.0
+RISK_PERCENT_PER_TRADE = 1.0   # كان 5% - كبير جداً لأن البوت يطلع أحياناً 10+ إشارات بنفس اللحظة
 
 # ============================ إعدادات عامة ============================
 TD_API_SLEEP_SECONDS = 8     # مهلة فقط عند استخدام Twelve Data كاحتياطي
@@ -120,7 +120,10 @@ def fetch_candles_yf(yf_symbol: str, interval: str):
         if df is None or df.empty:
             return None
         df = df.reset_index().rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})
-        return df[["open", "high", "low", "close"]].astype(float)
+        time_col = "Datetime" if "Datetime" in df.columns else df.columns[0]
+        df["time"] = pd.to_datetime(df[time_col], utc=True)
+        df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]].astype(float)
+        return df[["time", "open", "high", "low", "close"]]
     except Exception as e:
         print(f"[تحذير] فشل جلب بيانات Yahoo لـ {yf_symbol} ({interval}): {e}")
         return None
@@ -130,13 +133,15 @@ def fetch_candles_td(td_symbol: str, interval: str, outputsize: int = 100):
     if not TWELVE_DATA_KEY:
         return None
     url = "https://api.twelvedata.com/time_series"
-    params = {"symbol": td_symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_DATA_KEY}
+    params = {"symbol": td_symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_DATA_KEY,
+              "timezone": "UTC"}
     r = requests.get(url, params=params, timeout=20)
     data = r.json()
     if "values" not in data:
         print(f"[تحذير] فشل جلب بيانات Twelve Data لـ {td_symbol} ({interval}): {data}")
         return None
     df = pd.DataFrame(data["values"]).iloc[::-1].reset_index(drop=True)
+    df["time"] = pd.to_datetime(df["datetime"], utc=True)
     for col in ["open", "high", "low", "close"]:
         df[col] = df[col].astype(float)
     return df
@@ -287,28 +292,36 @@ def save_json(path, data):
 
 def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=20)
-    if r.status_code != 200:
-        print("[خطأ] فشل إرسال تيليجرام:", r.text)
+    try:
+        r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=20)
+        if r.status_code != 200:
+            print("[خطأ] فشل إرسال تيليجرام:", r.text)
+    except Exception as e:
+        # ما نخلي فشل الإرسال يوقف تسجيل الإشارة بالسجل
+        print("[خطأ] فشل إرسال تيليجرام:", e)
 
 
 # ============================ تتبع الأداء ============================
 
-def update_open_signals(log: list, label: str, latest_row):
-    high, low = latest_row["high"], latest_row["low"]
+def update_open_signals(log: list, label: str, entry_df: pd.DataFrame):
+    """يمشي على كل شموع M5 من وقت فتح الإشارة بالترتيب (مو آخر شمعة بس)،
+    لأن التشغيل الفعلي على GitHub يتأخر ساعات وممكن السعر يلمس الهدف/الوقف ويرجع.
+    لو الهدف والوقف انلمسوا بنفس الشمعة نحسبها خسارة (تحفّظ)."""
     for sig in log:
         if sig["symbol"] != label or sig["status"] != "open":
             continue
-        if sig["direction"] == "BUY":
-            if high >= sig["tp"]:
-                sig["status"], sig["closed_at"] = "win", datetime.now(timezone.utc).isoformat()
-            elif low <= sig["sl"]:
-                sig["status"], sig["closed_at"] = "loss", datetime.now(timezone.utc).isoformat()
-        else:
-            if low <= sig["tp"]:
-                sig["status"], sig["closed_at"] = "win", datetime.now(timezone.utc).isoformat()
-            elif high >= sig["sl"]:
-                sig["status"], sig["closed_at"] = "loss", datetime.now(timezone.utc).isoformat()
+        opened = pd.Timestamp(sig["opened_at"])
+        # نبدأ من الشمعة اللي تبدأ بعد وقت الإرسال (السعر المعروض = إغلاق الشمعة قبلها)
+        bars = entry_df[entry_df["time"] >= opened]
+        for _, bar in bars.iterrows():
+            if sig["direction"] == "BUY":
+                hit_sl, hit_tp = bar["low"] <= sig["sl"], bar["high"] >= sig["tp"]
+            else:
+                hit_sl, hit_tp = bar["high"] >= sig["sl"], bar["low"] <= sig["tp"]
+            if hit_sl or hit_tp:
+                sig["status"] = "loss" if hit_sl else "win"
+                sig["closed_at"] = bar["time"].isoformat()
+                break
 
 
 def maybe_send_weekly_summary(log: list, state: dict, now_utc: datetime):
@@ -318,7 +331,9 @@ def maybe_send_weekly_summary(log: list, state: dict, now_utc: datetime):
         if (now_utc - last_dt).days < SUMMARY_EVERY_DAYS:
             return
 
-    closed = [s for s in log if s["status"] in ("win", "loss")]
+    since = now_utc - timedelta(days=SUMMARY_EVERY_DAYS)
+    closed = [s for s in log if s["status"] in ("win", "loss")
+              and datetime.fromisoformat(s.get("closed_at", s["opened_at"])) >= since]
     if not closed:
         state["last_summary_sent"] = now_utc.isoformat()
         return
@@ -326,11 +341,15 @@ def maybe_send_weekly_summary(log: list, state: dict, now_utc: datetime):
     wins = sum(1 for s in closed if s["status"] == "win")
     total = len(closed)
     win_rate = (wins / total) * 100
+    net_r = wins * (TP_ATR_MULT / SL_ATR_MULT) - (total - wins)
+    still_open = sum(1 for s in log if s["status"] == "open")
 
     msg = (f"📊 ملخص أداء آخر {SUMMARY_EVERY_DAYS} أيام\n"
            f"عدد الصفقات المغلقة: {total}\n"
            f"رابحة: {wins} | خاسرة: {total - wins}\n"
-           f"نسبة النجاح: {win_rate:.1f}%\n"
+           f"نسبة النجاح: {win_rate:.1f}% (التعادل عند {100 * SL_ATR_MULT / (SL_ATR_MULT + TP_ATR_MULT):.0f}%)\n"
+           f"صافي النتيجة: {net_r:+.0f}R (R = مقدار المخاطرة بالصفقة)\n"
+           f"صفقات مفتوحة حالياً: {still_open}\n"
            f"(هذا تحليل احتمالي - راقب الأداء الحقيقي بحسابك بنفسك)")
     send_telegram(msg)
     print(msg)
@@ -356,7 +375,7 @@ def scan_symbol(cfg: dict, news_events: list, state: dict, log: list, now_utc: d
     trend_df = add_indicators(trend_df)
     entry_df = add_indicators(entry_df)
 
-    update_open_signals(log, label, entry_df.iloc[-1])
+    update_open_signals(log, label, entry_df)
 
     t = trend_df.iloc[-2]
     e1 = entry_df.iloc[-2]
