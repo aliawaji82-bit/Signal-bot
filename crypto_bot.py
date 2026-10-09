@@ -56,12 +56,18 @@ PAPER_NOTE = "🧪 إشارة تجريبية - بدون تنفيذ فعلي"
 def send(text):
     print(text + "\n" + "-" * 40)
     if not (TELEGRAM_TOKEN and TELEGRAM_CHAT_ID):
+        print("::warning::إعدادات تيليجرام ناقصة (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
         return
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                      data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=20)
+        r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                          data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=20)
+        if r.status_code != 200:
+            hint = {404: "التوكن غلط أو انلغى - حدّث TELEGRAM_BOT_TOKEN",
+                    400: "رقم المحادثة غلط - حدّث TELEGRAM_CHAT_ID",
+                    403: "البوت ما يقدر يرسل لك - أرسل له /start"}.get(r.status_code, "")
+            print(f"::error::فشل إرسال تيليجرام ({r.status_code}) {hint}: {r.text}")
     except Exception as e:
-        print("[خطأ] فشل إرسال تيليجرام:", e)
+        print("::error::فشل إرسال تيليجرام:", e)
 
 
 def fmt(p):
@@ -201,6 +207,10 @@ def main():
     btc_up = bool(btc["close"].iloc[-1] > btc["sma200"].iloc[-1])
     last_day = btc.index[-1]
     print(f"آخر شمعة مقفلة: {day(last_day)} | BTC فوق متوسط 200: {btc_up}")
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        # تشغيل يدوي من GitHub: رسالة تأكيد إن البوت يقدر يوصلك
+        send(f"✅ بوت الكريبتو شغّال (تشغيل يدوي)\nآخر شمعة يومية: {day(last_day)} | "
+             f"BTC {'فوق' if btc_up else 'تحت'} متوسط 200 يوم | العملات المقروءة: {len(data)} من {len(COINS)}")
 
     # ---------- 1) تحديث الصفقات المفتوحة ----------
     for t in [x for x in trades if x["status"] == "open"]:
