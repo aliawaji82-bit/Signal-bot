@@ -40,7 +40,8 @@ def prep(df):
     return df
 
 
-NEW, INFO = {}, {}
+NEW, INFO, RAW = {}, {}, {}
+BAD_MATCH = {"TON-USD", "TIA-USD"}   # الرمز البديل يطابق عملة ثانية بنفس الاسم
 print("=== البيانات والسيولة ===")
 for coin, syms in CANDIDATES.items():
     got = None
@@ -65,6 +66,8 @@ for coin, syms in CANDIDATES.items():
     print(f"  {coin:7s} {s:15s} {len(df):5d} يوم من {df.index[0]:%Y-%m-%d} | تداول يومي ≈ ${vol / 1e6:8,.0f}M {'✅' if ok else '⛔ ' + ('تاريخ قصير' if len(df) < MIN_DAYS else 'سيولة ضعيفة')}")
     if ok:
         NEW[coin] = prep(df)
+    if len(df) >= MIN_DAYS and s not in BAD_MATCH and coin != "XMR":
+        RAW[coin] = prep(df)
 
 
 GENS = {"Donchian20": ns["donchian_gen"](20, "donchian10", "btc>200"),
@@ -132,14 +135,33 @@ def simulate(rows, start, risk=0.01, max_open=5):
     return (eq ** (1 / yrs) - 1) * 100, (eq - 1) * 100, mdd * 100, taken, skipped
 
 
-print("\n=== محاكاة الحساب الكامل (الاستراتيجيتين، 1% مخاطرة، أقصى 5 صفقات) ===")
-base_rows = trades_for(BASE)
-new_rows = trades_for({c: NEW[c] for c in accepted}) if accepted else []
-all_rows = trades_for({c: NEW[c] for c in NEW})
-for lbl, start in (("من 2021", pd.Timestamp("2021-01-01", tz="UTC")), ("فترة الاختبار من منتصف 2023", SPLIT)):
-    for name, rows, mo in (("الـ16 الحالية", base_rows, 5), ("الـ16 + المقبولة", base_rows + new_rows, 5),
-                           ("الـ16 + المقبولة (حد 8 صفقات)", base_rows + new_rows, 8), ("الـ16 + كل الجديدة", base_rows + all_rows, 5)):
-        cagr, tot, mdd, taken, skipped = simulate(rows, start, max_open=mo)
-        print(f"  {lbl:28s} {name:30s} سنوي={cagr:+5.1f}% كلي={tot:+6.0f}% أقصى تراجع={mdd:4.1f}% صفقات={taken} فاتت بسبب الحد={skipped}")
-print(f"\nالعملات المقبولة: {accepted}")
-print("رموز Yahoo: " + str({c: INFO[c]['sym'] for c in accepted}))
+
+GENS_D = {"Donchian20": GENS["Donchian20"]}
+
+
+def trades_sel(coins_dfs, gens):
+    ns["D"].clear(); ns["D"].update(coins_dfs)
+    rows = []
+    for name, g in gens.items():
+        for x in ns["run_config"](name, g):
+            x["strategy"] = name
+            rows.append(x)
+    ns["D"].clear(); ns["D"].update(BASE)
+    return rows
+
+
+picked = [c for c in accepted if c != "XMR"]
+SETS = {"الـ16 الحالية": BASE,
+        f"الـ16 + الناجحة ({len(picked)})": {**BASE, **{c: RAW.get(c, NEW.get(c)) for c in picked}},
+        f"الـ16 + كل الجديدة ({len(RAW)})": {**BASE, **RAW}}
+print("\nكل الجديدة بالتجربة (بدون فلتر السيولة لأن بيانات حجم التداول بـ Yahoo غير موثوقة): " + ", ".join(RAW))
+for strat_name, gens in (("اختراق فقط", GENS_D), ("اختراق + إليوت", GENS)):
+    print(f"\n=== محاكاة الحساب: {strat_name} (1% مخاطرة لكل صفقة) ===")
+    for set_name, dfs in SETS.items():
+        rows = trades_sel(dfs, gens)
+        for mo in (5, 8, 10):
+            out = []
+            for lbl, start in (("من 2021", pd.Timestamp("2021-01-01", tz="UTC")), ("اختبار من منتصف 2023", SPLIT)):
+                cagr, tot, mdd, taken, skipped = simulate(rows, start, max_open=mo)
+                out.append(f"{lbl}: سنوي={cagr:+5.1f}% تراجع={mdd:4.1f}%")
+            print(f"  {set_name:26s} حد {mo:2d} صفقات | " + " | ".join(out))
