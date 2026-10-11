@@ -1,1 +1,13 @@
-[]
+[
+ {
+  "id": "ATOM-D20-2026-10-10",
+  "coin": "ATOM",
+  "strategy": "Donchian20",
+  "strategy_ar": "اختراق 20 يوم",
+  "entry": 1.9521737098693848,
+  "entry_date": "2026-10-10",
+  "stop": 1.705209227822199,
+  "initial_stop": 1.705209227822199,
+  "status": "open"
+ }
+]
