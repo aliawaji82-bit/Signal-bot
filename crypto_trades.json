@@ -8,7 +8,11 @@
   "entry_date": "2026-10-10",
   "stop": 1.705209227822199,
   "initial_stop": 1.705209227822199,
-  "status": "open",
-  "checked": "2026-10-14"
+  "status": "closed",
+  "checked": "2026-10-14",
+  "exit_price": 1.705209227822199,
+  "exit_date": "2026-10-15",
+  "exit_reason": "ضرب الوقف",
+  "R": -1.0
  }
 ]
