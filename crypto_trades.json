@@ -14,5 +14,16 @@
   "exit_date": "2026-10-15",
   "exit_reason": "ضرب الوقف",
   "R": -1.0
+ },
+ {
+  "id": "TRX-D20-2026-10-30",
+  "coin": "TRX",
+  "strategy": "Donchian20",
+  "strategy_ar": "اختراق 20 يوم",
+  "entry": 0.32767635583877563,
+  "entry_date": "2026-10-30",
+  "stop": 0.3169215807030187,
+  "initial_stop": 0.3169215807030187,
+  "status": "open"
  }
 ]
